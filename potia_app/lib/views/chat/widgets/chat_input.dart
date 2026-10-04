@@ -74,7 +74,7 @@ class _ChatInputState extends State<ChatInput> {
                     textInputAction: TextInputAction.send,
                     onSubmitted: (_) => _submit(),
                     decoration: const InputDecoration(
-                      hintText: 'Pergunte à PotIA... ex: Como fazer brigadeiro?',
+                      hintText: 'Pergunte à PotIA...',
                       border: InputBorder.none,
                       contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                     ),

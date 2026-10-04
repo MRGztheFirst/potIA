@@ -11,7 +11,7 @@ class EmptyChat extends StatelessWidget {
 
   static const _suggestions = [
     'Como fazer brigadeiro de panela?',
-    'Tenho ovos, cenoura e farinha. O que posso fazer?',
+    'Tenho ovos e cenoura. O que faço?',
     'Como assar pudim em banho-maria?',
     'Ideia de almoço rápido com frango',
   ];

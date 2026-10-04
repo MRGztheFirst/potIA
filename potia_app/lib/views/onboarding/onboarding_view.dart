@@ -99,41 +99,49 @@ class _OnboardingPageView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0.8, end: 1),
-            duration: const Duration(milliseconds: 650),
-            curve: Curves.easeOutBack,
-            builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
-            child: Container(
-              width: 200,
-              height: 200,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  colors: [Colors.orange.shade100, AppColors.cream],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final circle = (constraints.maxHeight * 0.36).clamp(110.0, 200.0);
+        return SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0.8, end: 1),
+                  duration: const Duration(milliseconds: 650),
+                  curve: Curves.easeOutBack,
+                  builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
+                  child: Container(
+                    width: circle,
+                    height: circle,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        colors: [Colors.orange.shade100, AppColors.cream],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      border: Border.all(color: Colors.orange.shade200, width: 2),
+                    ),
+                    child: Icon(page.icon, size: circle * 0.48, color: AppColors.primary),
+                  ),
                 ),
-                border: Border.all(color: Colors.orange.shade200, width: 2),
-              ),
-              child: Icon(page.icon, size: 96, color: AppColors.primary),
+                SizedBox(height: circle * 0.16),
+                Text(page.title, textAlign: TextAlign.center, style: textTheme.headlineSmall),
+                const SizedBox(height: 12),
+                Text(
+                  page.description,
+                  textAlign: TextAlign.center,
+                  style: textTheme.bodyLarge?.copyWith(color: AppColors.textMuted, height: 1.45),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 40),
-          Text(page.title, textAlign: TextAlign.center, style: textTheme.headlineSmall),
-          const SizedBox(height: 14),
-          Text(
-            page.description,
-            textAlign: TextAlign.center,
-            style: textTheme.bodyLarge?.copyWith(color: AppColors.textMuted, height: 1.45),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

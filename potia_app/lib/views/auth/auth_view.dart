@@ -44,6 +44,7 @@ class _AuthViewState extends State<AuthView> with SingleTickerProviderStateMixin
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
     return Scaffold(
       body: SafeArea(
         child: Column(
@@ -58,15 +59,25 @@ class _AuthViewState extends State<AuthView> with SingleTickerProviderStateMixin
                     )
                   : const SizedBox(height: 48),
             ),
-            const PotiaLogo(size: 76),
-            const SizedBox(height: 16),
-            Text('Bem-vindo(a) à PotIA', style: textTheme.headlineSmall),
-            const SizedBox(height: 4),
-            Text(
-              'Entre para começar a cozinhar com IA',
-              style: textTheme.bodyMedium?.copyWith(color: AppColors.textMuted),
+            AnimatedSize(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOut,
+              child: keyboardOpen
+                  ? const SizedBox(width: double.infinity)
+                  : Column(
+                      children: [
+                        const PotiaLogo(size: 76),
+                        const SizedBox(height: 16),
+                        Text('Bem-vindo(a) à PotIA', style: textTheme.headlineSmall),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Entre para começar a cozinhar com IA',
+                          style: textTheme.bodyMedium?.copyWith(color: AppColors.textMuted),
+                        ),
+                        const SizedBox(height: 24),
+                      ],
+                    ),
             ),
-            const SizedBox(height: 24),
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 24),
               padding: const EdgeInsets.all(4),
@@ -240,12 +251,12 @@ class _RegisterFormState extends State<_RegisterForm> {
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
       child: Form(
         key: _formKey,
-        autovalidateMode: AutovalidateMode.onUserInteraction,
         child: AutofillGroup(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               TextFormField(
+                autovalidateMode: AutovalidateMode.onUserInteraction,
                 controller: _nameController,
                 textCapitalization: TextCapitalization.words,
                 textInputAction: TextInputAction.next,
@@ -255,6 +266,7 @@ class _RegisterFormState extends State<_RegisterForm> {
               ),
               const SizedBox(height: 16),
               TextFormField(
+                autovalidateMode: AutovalidateMode.onUserInteraction,
                 controller: _emailController,
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
@@ -264,6 +276,7 @@ class _RegisterFormState extends State<_RegisterForm> {
               ),
               const SizedBox(height: 16),
               TextFormField(
+                autovalidateMode: AutovalidateMode.onUserInteraction,
                 controller: _passwordController,
                 obscureText: _obscurePassword,
                 textInputAction: TextInputAction.next,
@@ -281,6 +294,7 @@ class _RegisterFormState extends State<_RegisterForm> {
               ),
               const SizedBox(height: 16),
               TextFormField(
+                autovalidateMode: AutovalidateMode.onUserInteraction,
                 controller: _confirmController,
                 obscureText: _obscurePassword,
                 textInputAction: TextInputAction.done,
@@ -308,10 +322,12 @@ class _VisibilityToggle extends StatelessWidget {
   final VoidCallback onPressed;
 
   @override
-  Widget build(BuildContext context) => IconButton(
-        tooltip: obscured ? 'Mostrar senha' : 'Esconder senha',
-        icon: Icon(obscured ? Icons.visibility_outlined : Icons.visibility_off_outlined),
-        onPressed: onPressed,
+  Widget build(BuildContext context) => ExcludeFocus(
+        child: IconButton(
+          tooltip: obscured ? 'Mostrar senha' : 'Esconder senha',
+          icon: Icon(obscured ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+          onPressed: onPressed,
+        ),
       );
 }
 
