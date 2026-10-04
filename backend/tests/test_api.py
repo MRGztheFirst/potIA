@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import Iterator
 
@@ -7,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
-from app.routers.chat import build_conversation
+from app.routers.chat import IMAGE_ONLY_PROMPT, build_conversation
 from app.schemas import ChatRequest
 from main import create_app
 
@@ -150,6 +151,57 @@ def test_build_conversation_sanitizes_history(settings: Settings) -> None:
     assert messages[0] == {"role": "system", "content": settings.system_prompt}
     assert [m["role"] for m in messages] == ["system", "user"]
     assert messages[1]["content"] == "Oi\n\nTudo bem?"
+
+
+PNG = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32).decode()
+
+
+def test_chat_accepts_photo(client: TestClient) -> None:
+    token = register(client)["access_token"]
+    body = {"messages": [{"role": "user", "content": "", "images": [f"data:image/png;base64,{PNG}"]}], "stream": False}
+    response = client.post("/api/v1/chat", json=body, headers=auth_header(token))
+    assert response.status_code == 200, response.text
+    assert "Recebi sua foto" in response.json()["message"]["content"]
+
+
+@pytest.mark.parametrize(
+    "message,expected",
+    [
+        ({"role": "user", "content": "Oi", "images": [base64.b64encode(b"GIF89a" + b"0" * 20).decode()]}, "JPG, PNG ou WebP"),
+        ({"role": "user", "content": "Oi", "images": ["isso não é base64!"]}, "base64"),
+        ({"role": "user", "content": "   "}, "não pode ficar vazia"),
+        ({"role": "user", "content": "Oi", "images": [PNG] * 5}, "'fotos' deve ter no máximo 4 itens"),
+    ],
+)
+def test_invalid_messages(client: TestClient, message: dict, expected: str) -> None:
+    token = register(client)["access_token"]
+    response = client.post("/api/v1/chat", json={"messages": [message]}, headers=auth_header(token))
+    assert response.status_code == 422
+    assert expected in response.json()["detail"]
+
+
+def test_photo_rejected_when_model_has_no_vision(client: TestClient) -> None:
+    token = register(client)["access_token"]
+    client.app.state.engine.supports_images = False
+    body = {"messages": [{"role": "user", "content": "O que é?", "images": [PNG]}]}
+    response = client.post("/api/v1/chat", json=body, headers=auth_header(token))
+    assert response.status_code == 422
+    assert "não enxerga fotos" in response.json()["detail"]
+
+
+def test_only_last_message_keeps_photos(settings: Settings) -> None:
+    request = ChatRequest(
+        messages=[
+            {"role": "user", "content": "Olha minha geladeira", "images": [PNG, PNG]},
+            {"role": "assistant", "content": "Vejo ovos e tomates."},
+            {"role": "user", "content": "", "images": [PNG]},
+        ]
+    )
+    messages = build_conversation(request, settings)
+    assert "images" not in messages[1]
+    assert messages[1]["content"] == "Olha minha geladeira\n\n[2 foto(s) enviada(s) antes nesta conversa]"
+    assert messages[3]["images"] == [PNG]
+    assert messages[3]["content"] == IMAGE_ONLY_PROMPT
 
 
 def test_health(client: TestClient) -> None:

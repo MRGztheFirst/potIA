@@ -1,11 +1,40 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+MAX_IMAGES_PER_MESSAGE = 4
+MAX_IMAGE_BYTES = 6 * 1024 * 1024
+_IMAGE_SIGNATURES = ((b"\xff\xd8\xff", "image/jpeg"), (b"\x89PNG", "image/png"))
+
+
+def image_mime(data: bytes) -> str | None:
+    for signature, mime in _IMAGE_SIGNATURES:
+        if data.startswith(signature):
+            return mime
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def _clean_image(value: str) -> str:
+    encoded = value.split(",", 1)[1] if value.startswith("data:") else value
+    encoded = "".join(encoded.split())
+    if len(encoded) * 3 // 4 > MAX_IMAGE_BYTES:
+        raise ValueError("Cada foto pode ter no máximo 6 MB.")
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("Foto inválida: envie a imagem em base64.") from None
+    if image_mime(raw) is None:
+        raise ValueError("Envie fotos em JPG, PNG ou WebP.")
+    return encoded
 
 
 def _normalize_email(value: str) -> str:
@@ -67,7 +96,25 @@ class TokenResponse(BaseModel):
 
 class ChatMessage(BaseModel):
     role: Literal["system", "user", "assistant"]
-    content: str = Field(min_length=1, max_length=8000)
+    content: str = Field(default="", max_length=24_000)
+    images: list[str] = Field(
+        default_factory=list,
+        max_length=MAX_IMAGES_PER_MESSAGE,
+        description="Fotos em base64 (JPG, PNG ou WebP), só em mensagens do usuário.",
+    )
+
+    @field_validator("images")
+    @classmethod
+    def _validate_images(cls, value: list[str]) -> list[str]:
+        return [_clean_image(item) for item in value]
+
+    @model_validator(mode="after")
+    def _not_empty(self) -> "ChatMessage":
+        if self.images and self.role != "user":
+            raise ValueError("Só mensagens do usuário podem ter fotos.")
+        if not self.content.strip() and not self.images:
+            raise ValueError("A mensagem não pode ficar vazia.")
+        return self
 
 
 class ChatRequest(BaseModel):

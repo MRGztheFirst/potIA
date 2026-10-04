@@ -87,10 +87,12 @@ Documentação interativa em http://localhost:8000/docs. Testes: `pytest -v`.
 | `POST /api/v1/auth/register` | `{name, email, password}` → JWT |
 | `POST /api/v1/auth/login` | `{email, password}` → JWT |
 | `GET /api/v1/auth/me` | usuário do token |
-| `POST /api/v1/chat` | `{messages: [{role, content}], stream: true}` → SSE |
+| `POST /api/v1/chat` | `{messages: [{role, content, images?}], stream: true}` → SSE |
 | `GET /health` | estado da API e do motor |
 
 Eventos SSE: `{"type":"token","content":"..."}`, `{"type":"done"}` e `{"type":"error","detail":"..."}`.
+
+`images` aceita até 4 fotos em base64 (JPG, PNG ou WebP, 6 MB cada) por mensagem do usuário. Só a última mensagem leva as fotos ao modelo; nas anteriores elas viram uma nota de texto. Fotos exigem um modelo com visão (no Ollama, o `qwen3.5:9b`); sem isso a API responde 422.
 
 Motor de inferência (`POTIA_LLM_ENGINE` no `.env`):
 
@@ -108,7 +110,7 @@ winget install Ollama.Ollama
 ollama pull qwen2.5:7b
 ```
 
-O `qwen2.5:7b` (~4,7 GB) é o mesmo modelo base do fine-tuning da Fase 3. Outro modelo pode ser usado com `POTIA_OLLAMA_MODEL`.
+O padrão é o `qwen3.5:9b` (~6,6 GB), que entende texto e fotos. Em GPUs menores, use `qwen3.5:4b`, e para só texto o `qwen2.5:7b` (mesmo modelo base da Fase 3). Troque com `POTIA_OLLAMA_MODEL`.
 
 Gere uma chave JWT nova com:
 
@@ -131,6 +133,12 @@ flutter run
 - **Celular físico:** `flutter run --dart-define=API_BASE_URL=http://IP_DO_PC:8000`.
 - **iOS:** para HTTP local, adicione `NSAppTransportSecurity → NSAllowsLocalNetworking` no `Info.plist`.
 
-Estrutura de `lib/`: `models/` (dados), `services/` (HTTP, parser SSE, armazenamento), `providers/` (estado com ChangeNotifier), `views/` (splash, onboarding, auth, chat) e `core/` (tema, rotas, configuração, validações).
+Recursos do chat:
+
+- **Histórico:** as conversas ficam salvas no aparelho, separadas por usuário (`potia/u<id>/` na pasta do app). O menu lateral agrupa por data e permite renomear e apagar (os anexos vão junto).
+- **Fotos e documentos:** o botão **+** abre câmera, galeria ou arquivos. As fotos são reduzidas para 1280 px. O texto de PDF, DOCX, TXT, MD e CSV é extraído no próprio celular e vai junto com a pergunta.
+- **Áudio:** o microfone usa o reconhecimento de voz do Android em português. A fala vira texto no aparelho e é enviada como "mensagem de voz".
+
+Estrutura de `lib/`: `models/` (dados), `services/` (HTTP, parser SSE, armazenamento, anexos, voz), `providers/` (estado com ChangeNotifier), `views/` (splash, onboarding, auth, chat) e `core/` (tema, rotas, configuração, validações).
 
 Testes: `flutter test`.

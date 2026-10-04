@@ -15,6 +15,7 @@ _FIELD_LABELS = {
     "password": "senha",
     "messages": "mensagens",
     "content": "conteúdo da mensagem",
+    "images": "fotos",
     "role": "papel da mensagem",
     "temperature": "temperatura",
     "max_tokens": "máximo de tokens",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import logging
@@ -16,10 +17,11 @@ import httpx
 from starlette.concurrency import iterate_in_threadpool
 
 from .config import Settings
+from .schemas import image_mime
 
 logger = logging.getLogger("potia.llm")
 
-Messages = list[dict[str, str]]
+Messages = list[dict[str, Any]]
 
 
 class EngineError(RuntimeError):
@@ -36,6 +38,7 @@ class GenerationParams:
 
 class LLMEngine(ABC):
     name = "base"
+    supports_images = False
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -98,12 +101,23 @@ def _strip_accents(text: str) -> str:
 
 class MockEngine(LLMEngine):
     name = "mock"
+    supports_images = True
 
     async def stream(self, messages: Messages, params: GenerationParams) -> AsyncIterator[str]:
-        answer = self._compose(messages[-1]["content"])
+        last = messages[-1]
+        answer = self._describe_photos(len(last["images"])) if last.get("images") else self._compose(last["content"])
         for piece in re.findall(r"\S+\s*", answer):
             await asyncio.sleep(self.settings.mock_token_delay)
             yield piece
+
+    @staticmethod
+    def _describe_photos(count: int) -> str:
+        noun = "sua foto" if count == 1 else f"suas {count} fotos"
+        return (
+            f"Recebi {noun}! 📸 No modo de demonstração eu ainda não enxergo imagens, "
+            "mas com POTIA_LLM_ENGINE=ollama e um modelo com visão (qwen3.5:9b) eu identifico "
+            "os ingredientes e sugiro receitas."
+        )
 
     @staticmethod
     def _compose(question: str) -> str:
@@ -289,9 +303,21 @@ class HTTPEngine(LLMEngine):
             raise EngineError(f"Erro de comunicação com o {self.label}.") from exc
 
 
+def _openai_message(message: dict[str, Any]) -> dict[str, Any]:
+    images = message.get("images")
+    if not images:
+        return {"role": message["role"], "content": message["content"]}
+    parts: list[dict[str, Any]] = [{"type": "text", "text": message["content"]}]
+    for encoded in images:
+        mime = image_mime(base64.b64decode(encoded[:32])) or "image/jpeg"
+        parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}})
+    return {"role": message["role"], "content": parts}
+
+
 class VLLMEngine(HTTPEngine):
     name = "vllm"
     label = "servidor do modelo (vLLM)"
+    supports_images = True
 
     async def startup(self) -> None:
         s = self.settings
@@ -309,7 +335,7 @@ class VLLMEngine(HTTPEngine):
     async def stream(self, messages: Messages, params: GenerationParams) -> AsyncIterator[str]:
         payload = {
             "model": self.settings.vllm_model,
-            "messages": messages,
+            "messages": [_openai_message(m) for m in messages],
             "stream": True,
             "max_tokens": params.max_new_tokens,
             "temperature": params.temperature,
@@ -341,6 +367,14 @@ class OllamaEngine(HTTPEngine):
     name = "ollama"
     label = "Ollama"
 
+    def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None) -> None:
+        super().__init__(settings, transport)
+        self._capabilities: set[str] | None = None
+
+    @property
+    def supports_images(self) -> bool:
+        return self._capabilities is None or "vision" in self._capabilities
+
     async def startup(self) -> None:
         s = self.settings
         self._open_client(s.ollama_base_url)
@@ -351,13 +385,29 @@ class OllamaEngine(HTTPEngine):
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("Ollama indisponível em %s (%s). Abra o Ollama e reinicie a API.", s.ollama_base_url, exc)
             return
-        if _ollama_name(s.ollama_model) in installed:
-            self.ready = True
-        else:
+        if _ollama_name(s.ollama_model) not in installed:
             logger.warning(
                 "Modelo %r não está instalado no Ollama. Rode: ollama pull %s. Instalados: %s",
                 s.ollama_model, s.ollama_model, sorted(installed),
             )
+            return
+        self.ready = True
+        await self._load_capabilities()
+        logger.info("Modelo %s | recursos: %s", s.ollama_model, sorted(self._capabilities or ()))
+
+    async def _load_capabilities(self) -> None:
+        try:
+            response = await self._client.post("/api/show", json={"model": self.settings.ollama_model})
+            response.raise_for_status()
+            self._capabilities = set(response.json().get("capabilities") or ())
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("Não foi possível ler os recursos do modelo no Ollama (%s).", exc)
+
+    def describe(self) -> dict[str, Any]:
+        info = super().describe()
+        info["model"] = self.settings.ollama_model
+        info["vision"] = self.supports_images
+        return info
 
     def _status_error(self, status_code: int, body: str) -> EngineError:
         if status_code == 404:
@@ -366,7 +416,9 @@ class OllamaEngine(HTTPEngine):
 
     async def stream(self, messages: Messages, params: GenerationParams) -> AsyncIterator[str]:
         s = self.settings
-        payload = {
+        if self._capabilities is None and self._client is not None:
+            await self._load_capabilities()
+        payload: dict[str, Any] = {
             "model": s.ollama_model,
             "messages": messages,
             "stream": True,
@@ -379,6 +431,8 @@ class OllamaEngine(HTTPEngine):
                 "repeat_penalty": params.repetition_penalty,
             },
         }
+        if self._capabilities and "thinking" in self._capabilities:
+            payload["think"] = False
         async with contextlib.aclosing(self._stream_lines("/api/chat", payload)) as lines:
             async for line in lines:
                 if not line.strip():

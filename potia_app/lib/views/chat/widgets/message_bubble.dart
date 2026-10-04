@@ -5,6 +5,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../models/chat_message.dart';
 import '../../widgets/app_snackbar.dart';
 import '../../widgets/potia_logo.dart';
+import 'attachment_views.dart';
 import 'typing_indicator.dart';
 
 class MessageBubble extends StatelessWidget {
@@ -16,7 +17,40 @@ class MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final maxWidth = MediaQuery.sizeOf(context).width * (message.isUser ? 0.78 : 0.82);
-    final bubble = ConstrainedBox(
+    if (message.isUser && message.attachments.isNotEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            MessageAttachments(attachments: message.attachments, maxWidth: maxWidth * 0.8),
+            if (message.content.trim().isNotEmpty) ...[
+              const SizedBox(height: 6),
+              _buildBubble(maxWidth),
+            ],
+          ],
+        ),
+      );
+    }
+
+    final bubble = _buildBubble(maxWidth);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: message.isUser
+          ? Align(alignment: Alignment.centerRight, child: bubble)
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                const PotiaLogo(size: 32),
+                const SizedBox(width: 8),
+                Flexible(child: bubble),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildBubble(double maxWidth) {
+    return ConstrainedBox(
       constraints: BoxConstraints(maxWidth: maxWidth),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -32,20 +66,6 @@ class MessageBubble extends StatelessWidget {
         ),
         child: _BubbleContent(message: message, onRetry: onRetry),
       ),
-    );
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: message.isUser
-          ? Align(alignment: Alignment.centerRight, child: bubble)
-          : Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                const PotiaLogo(size: 32),
-                const SizedBox(width: 8),
-                Flexible(child: bubble),
-              ],
-            ),
     );
   }
 }
@@ -103,6 +123,27 @@ class _BubbleContent extends StatelessWidget {
       );
     }
 
+    if (message.isUser && message.fromVoice) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.mic_rounded, size: 16, color: AppColors.primary),
+              const SizedBox(width: 4),
+              Text(
+                'Mensagem de voz',
+                style: textStyle?.copyWith(fontSize: 12, color: AppColors.textMuted, fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          SelectableText(message.content, style: textStyle),
+        ],
+      );
+    }
     if (message.isUser) return SelectableText(message.content, style: textStyle);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

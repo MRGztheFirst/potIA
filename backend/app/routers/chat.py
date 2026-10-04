@@ -10,10 +10,12 @@ from fastapi.responses import StreamingResponse
 from ..config import Settings
 from ..deps import CurrentUser, EngineDep, SettingsDep
 from ..llm_engines import EngineError, GenerationParams, Messages
-from ..schemas import ChatMessage, ChatRequest, ChatResponse
+from ..schemas import MAX_IMAGES_PER_MESSAGE, ChatMessage, ChatRequest, ChatResponse
 
 router = APIRouter(prefix="/api/v1", tags=["Chat"])
 logger = logging.getLogger("potia.chat")
+
+IMAGE_ONLY_PROMPT = "Veja a foto e me ajude na cozinha: o que é e o que dá para preparar com isso?"
 
 
 def build_conversation(request: ChatRequest, settings: Settings) -> Messages:
@@ -31,13 +33,34 @@ def build_conversation(request: ChatRequest, settings: Settings) -> Messages:
     merged: Messages = []
     for message in kept:
         if merged and merged[-1]["role"] == message.role:
-            merged[-1]["content"] += "\n\n" + message.content
+            merged[-1]["content"] = _join(merged[-1]["content"], message.content)
+            merged[-1]["images"] += message.images
         else:
-            merged.append({"role": message.role, "content": message.content})
+            merged.append({"role": message.role, "content": message.content, "images": list(message.images)})
     while merged and merged[0]["role"] != "user":
         merged.pop(0)
 
+    for turn in merged[:-1]:
+        images = turn.pop("images")
+        if images:
+            turn["content"] = _join(turn["content"], f"[{len(images)} foto(s) enviada(s) antes nesta conversa]")
+    if merged:
+        last = merged[-1]
+        images = last.pop("images")[-MAX_IMAGES_PER_MESSAGE:]
+        if images:
+            last["images"] = images
+            if not last["content"].strip():
+                last["content"] = IMAGE_ONLY_PROMPT
+
     return [{"role": "system", "content": settings.system_prompt}, *merged]
+
+
+def _join(first: str, second: str) -> str:
+    return "\n\n".join(part for part in (first, second) if part.strip())
+
+
+def has_images(messages: Messages) -> bool:
+    return any(m.get("images") for m in messages)
 
 
 def build_params(request: ChatRequest, settings: Settings) -> GenerationParams:
@@ -62,6 +85,11 @@ async def chat(body: ChatRequest, user: CurrentUser, settings: SettingsDep, engi
     messages = build_conversation(body, settings)
     params = build_params(body, settings)
     logger.info("Chat de user=%s (%d mensagens, engine=%s)", user["id"], len(messages) - 1, engine.name)
+    if has_images(messages) and not engine.supports_images:
+        raise HTTPException(
+            status_code=422,
+            detail="O modelo atual da PotIA não enxerga fotos. Use um modelo com visão, como o qwen3.5:9b.",
+        )
 
     if not body.stream:
         try:

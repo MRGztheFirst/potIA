@@ -5,7 +5,6 @@ import 'package:http/http.dart' as http;
 
 import '../core/config/app_config.dart';
 import '../models/auth_session.dart';
-import '../models/chat_message.dart';
 import '../models/user_model.dart';
 import 'api_exception.dart';
 import 'sse_parser.dart';
@@ -45,16 +44,13 @@ class ApiService {
 
   Future<UserModel> me() async => UserModel.fromJson(await _send('GET', '/api/v1/auth/me', authenticated: true));
 
-  Stream<String> streamChat(List<ChatMessage> history) async* {
+  Stream<String> streamChat(List<Map<String, dynamic>> messages) async* {
     final client = http.Client();
     _activeStreamClient = client;
     try {
       final request = http.Request('POST', _uri('/api/v1/chat'))
         ..headers.addAll(_headers(authenticated: true, accept: 'text/event-stream'))
-        ..body = jsonEncode({
-          'messages': history.map((m) => m.toApiJson()).toList(),
-          'stream': true,
-        });
+        ..body = jsonEncode({'messages': messages, 'stream': true});
 
       final http.StreamedResponse response;
       try {

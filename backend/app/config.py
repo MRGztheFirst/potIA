@@ -79,7 +79,7 @@ class Settings:
     vllm_model: str = "potia"
     vllm_api_key: str | None = None
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen2.5:7b"
+    ollama_model: str = "qwen3.5:9b"
     ollama_num_ctx: int = 8192
     ollama_keep_alive: str = "30m"
     mock_token_delay: float = 0.03
@@ -90,7 +90,7 @@ class Settings:
     repetition_penalty: float = 1.05
     generation_timeout: float = 120.0
     max_history_messages: int = 20
-    max_history_chars: int = 12_000
+    max_history_chars: int = 16_000
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
 
     def __post_init__(self) -> None:
