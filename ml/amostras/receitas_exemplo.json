@@ -1,0 +1,141 @@
+[
+  {
+    "@context": "https://schema.org",
+    "@type": "Recipe",
+    "url": "exemplo://bolo-de-cenoura",
+    "name": "Receita de Bolo de cenoura com cobertura de chocolate",
+    "totalTime": "PT1H",
+    "recipeYield": ["12", "12 fatias"],
+    "recipeIngredient": [
+      "• 3 cenouras médias descascadas e picadas",
+      "• 4 ovos",
+      "• 1/2 xíc. (chá) de óleo",
+      "• 2 xíc. (chá) de açúcar",
+      "• 2 1/2 xícaras (chá) de farinha de trigo",
+      "• 1 c. (sopa) de fermento em pó",
+      "Cobertura:",
+      "• 2 c. (sopa) de manteiga",
+      "• 3 colheres (sopa) de chocolate em pó",
+      "• 1 xíc. (chá) de açúcar",
+      "• 1/2 xícara (chá) de leite"
+    ],
+    "recipeInstructions": [
+      {"@type": "HowToSection", "name": "Massa", "itemListElement": [
+        {"@type": "HowToStep", "text": "Pré-aqueça o forno a 180ºC e unte uma forma com manteiga e farinha."},
+        {"@type": "HowToStep", "text": "No liquidificador, bata as cenouras, os ovos e o óleo por 3 minutos!!!"},
+        {"@type": "HowToStep", "text": "Despeje em uma tigela, junte o açúcar e a farinha e misture bem.Por último, acrescente o fermento mexendo devagar."},
+        {"@type": "HowToStep", "text": "Leve ao forno por cerca de 40 minutos, até que um palito saia limpo &#128525;"}
+      ]},
+      {"@type": "HowToSection", "name": "Cobertura", "itemListElement": [
+        {"@type": "HowToStep", "text": "Em uma panela, leve todos os ingredientes ao fogo baixo, mexendo sempre, até engrossar."},
+        {"@type": "HowToStep", "text": "Espalhe a cobertura ainda quente sobre o bolo."}
+      ]}
+    ]
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": ["Recipe"],
+    "url": "exemplo://brigadeiro",
+    "name": "Brigadeiro de panela",
+    "prepTime": "PT5M",
+    "cookTime": "PT15M",
+    "recipeYield": "25",
+    "recipeIngredient": [
+      "1 lata de leite condensado",
+      "1 c. sopa de manteiga sem sal",
+      "4 colheres (sopa) de chocolate em pó",
+      "Chocolate granulado para enrolar"
+    ],
+    "recipeInstructions": "<ol><li>Em uma panela, junte o leite condensado, a manteiga e o chocolate em pó.</li><li>Cozinhe em fogo baixo, mexendo sem parar, até a massa desgrudar do fundo da panela (cerca de 15 minutos).</li><li>Transfira para um prato untado e deixe esfriar.</li><li>Com as mãos untadas, enrole bolinhas e passe no granulado.</li></ol>"
+  },
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {"@type": "WebPage", "name": "Arroz branco soltinho | Site de Exemplo"},
+      {
+        "@type": "Recipe",
+        "url": "exemplo://arroz-branco",
+        "name": "Arroz branco soltinho",
+        "totalTime": "PT30M",
+        "recipeYield": "4 porções",
+        "recipeIngredient": [
+          "2 xícaras (chá) de arroz branco",
+          "4 xícaras (chá) de água fervente",
+          "2 c. (sopa) de óleo",
+          "1/2 cebola picada",
+          "2 dentes de alho amassados",
+          "Sal a gosto"
+        ],
+        "recipeInstructions": "1. Lave o arroz e deixe escorrer bem. 2. Em uma panela, aqueça o óleo e refogue a cebola e o alho até dourar. 3. Junte o arroz e refogue por 2 minutos, mexendo. 4. Acrescente a água fervente e o sal, abaixe o fogo e tampe parcialmente. 5. Cozinhe até a água secar, cerca de 15 minutos, e deixe descansar tampado por 5 minutos."
+      }
+    ]
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "Recipe",
+    "url": "exemplo://pudim",
+    "name": "Pudim de leite condensado",
+    "totalTime": "P0DT1H30M",
+    "recipeYield": "10 porções",
+    "recipeIngredient": [
+      "1 lata de leite condensado",
+      "A mesma medida (da lata) de leite",
+      "3 ovos",
+      "1 xícara (chá) de açúcar para a calda"
+    ],
+    "recipeInstructions": [
+      "Derreta o açúcar em uma forma de furo central, em fogo baixo, até virar uma calda dourada; espalhe pelas laterais.",
+      "Bata no liquidificador o leite condensado, o leite e os ovos por 2 minutos.",
+      "Despeje na forma caramelizada e cubra com papel alumínio.",
+      "Asse em banho maria, em forno pré aquecido a 180 graus, por cerca de 1 hora e 30 minutos.",
+      "Deixe esfriar, leve à geladeira por 4 horas e desenforme."
+    ]
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "Recipe",
+    "url": "exemplo://frango-refogado",
+    "name": "Frango refogado com legumes",
+    "totalTime": "PT40M",
+    "recipeYield": 4,
+    "recipeIngredient": [
+      "500g de peito de frango em cubos",
+      "2 cenouras em rodelas",
+      "1 abobrinha em cubos",
+      "1 cebola picada",
+      "3 dentes de alho picados",
+      "2 colheres (sopa) de azeite de oliva",
+      "Sal e pimenta-do-reino q.b.",
+      "Cheiro verde picado a gosto"
+    ],
+    "recipeInstructions": [
+      {"@type": "HowToStep", "text": "Tempere o frango com sal e pimenta."},
+      {"@type": "HowToStep", "text": "Em uma panela grande, aqueça o azeite e refogue a cebola e o alho até ficarem transparentes."},
+      {"@type": "HowToStep", "text": "Junte o frango e doure de todos os lados em fogo médio."},
+      {"@type": "HowToStep", "text": "Acrescente a cenoura e a abobrinha, tampe e cozinhe em fogo brando por 15 minutos, mexendo de vez em quando."},
+      {"@type": "HowToStep", "text": "Finalize com cheiro verde e sirva quente."}
+    ]
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "Recipe",
+    "url": "exemplo://pao-de-queijo",
+    "name": "PÃ£o de queijo mineiro",
+    "totalTime": "PT50M",
+    "recipeYield": "30 unidades",
+    "recipeIngredient": [
+      "500g de polvilho azedo",
+      "1 xÃ­cara (chÃ¡) de leite",
+      "1/2 xÃ­cara (chÃ¡) de Ã³leo",
+      "1 c. (chÃ¡) de sal",
+      "2 ovos",
+      "200g de queijo minas meia cura ralado"
+    ],
+    "recipeInstructions": [
+      "Ferva o leite, o Ã³leo e o sal.",
+      "Escalde o polvilho com essa mistura e mexa atÃ© esfriar.",
+      "Junte os ovos um a um e depois o queijo, sovando atÃ© a massa ficar lisa.",
+      "Modele bolinhas e asse em forno prÃ©-aquecido a 200Â°C por 25 minutos, atÃ© dourar."
+    ]
+  }
+]

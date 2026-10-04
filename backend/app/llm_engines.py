@@ -1,0 +1,323 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import queue
+import re
+import threading
+import unicodedata
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Any, AsyncIterator
+
+import httpx
+from starlette.concurrency import iterate_in_threadpool
+
+from .config import Settings
+
+logger = logging.getLogger("potia.llm")
+
+Messages = list[dict[str, str]]
+
+
+class EngineError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class GenerationParams:
+    max_new_tokens: int
+    temperature: float
+    top_p: float
+    repetition_penalty: float
+
+
+class LLMEngine(ABC):
+    name = "base"
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.ready = False
+
+    async def startup(self) -> None:
+        self.ready = True
+
+    async def shutdown(self) -> None:
+        self.ready = False
+
+    @abstractmethod
+    def stream(self, messages: Messages, params: GenerationParams) -> AsyncIterator[str]:
+        ...
+
+    async def generate(self, messages: Messages, params: GenerationParams) -> str:
+        parts = [chunk async for chunk in self.stream(messages, params)]
+        return "".join(parts).strip()
+
+    def describe(self) -> dict[str, Any]:
+        return {"engine": self.name, "ready": self.ready}
+
+
+_MOCK_RECIPES = {
+    "brigadeiro": (
+        "Claro! Aqui está a receita de brigadeiro de panela.\n\n"
+        "⏱️ Tempo de preparo: 20 min\n🍽️ Rendimento: 25 unidades\n\n"
+        "Ingredientes:\n• 1 lata de leite condensado\n• 1 colher de sopa de manteiga sem sal\n"
+        "• 4 colheres de sopa de chocolate em pó\n• Chocolate granulado para enrolar\n\n"
+        "Modo de preparo:\n1. Em uma panela, junte o leite condensado, a manteiga e o chocolate em pó.\n"
+        "2. Cozinhe em fogo baixo, mexendo sem parar, até a massa desgrudar do fundo da panela.\n"
+        "3. Transfira para um prato untado e deixe esfriar.\n"
+        "4. Com as mãos untadas, enrole bolinhas e passe no granulado.\n\nBom apetite!"
+    ),
+    "bolo de cenoura": (
+        "Ótima escolha! Veja como fazer bolo de cenoura.\n\n"
+        "⏱️ Tempo de preparo: 1 h\n🍽️ Rendimento: 12 fatias\n\n"
+        "Ingredientes:\n• 3 cenouras médias picadas\n• 4 ovos\n• 1/2 xícara de chá de óleo\n"
+        "• 2 xícaras de chá de açúcar\n• 2 1/2 xícaras de chá de farinha de trigo\n"
+        "• 1 colher de sopa de fermento em pó\n\n"
+        "Modo de preparo:\n1. Pré-aqueça o forno a 180 °C e unte uma forma.\n"
+        "2. Bata no liquidificador as cenouras, os ovos e o óleo.\n"
+        "3. Em uma tigela, misture o creme com o açúcar e a farinha; por último, o fermento.\n"
+        "4. Asse por cerca de 40 minutos, até o palito sair limpo.\n\nEspero que fique delicioso!"
+    ),
+    "arroz": (
+        "Vamos lá! Arroz branco soltinho:\n\n⏱️ Tempo de preparo: 30 min\n🍽️ Rendimento: 4 porções\n\n"
+        "Ingredientes:\n• 2 xícaras de chá de arroz\n• 4 xícaras de chá de água fervente\n"
+        "• 2 colheres de sopa de óleo\n• 2 dentes de alho amassados\n• Sal a gosto\n\n"
+        "Modo de preparo:\n1. Refogue o alho no óleo até dourar.\n2. Junte o arroz e refogue por 2 minutos.\n"
+        "3. Acrescente a água fervente e o sal, tampe parcialmente e cozinhe em fogo baixo até secar.\n"
+        "4. Desligue e deixe descansar tampado por 5 minutos.\n\nBom apetite!"
+    ),
+}
+
+
+def _strip_accents(text: str) -> str:
+    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().lower()
+
+
+class MockEngine(LLMEngine):
+    name = "mock"
+
+    async def stream(self, messages: Messages, params: GenerationParams) -> AsyncIterator[str]:
+        answer = self._compose(messages[-1]["content"])
+        for piece in re.findall(r"\S+\s*", answer):
+            await asyncio.sleep(self.settings.mock_token_delay)
+            yield piece
+
+    @staticmethod
+    def _compose(question: str) -> str:
+        normalized = _strip_accents(question)
+        for keyword, recipe in _MOCK_RECIPES.items():
+            if _strip_accents(keyword) in normalized:
+                return recipe
+        short = question if len(question) <= 160 else question[:157] + "..."
+        return (
+            "Olá! Estou rodando em modo de demonstração (POTIA_LLM_ENGINE=mock), "
+            "então ainda não consigo criar receitas novas. 😊\n\n"
+            f"Você perguntou: \"{short}\"\n\n"
+            "Para respostas de verdade, treine o modelo na Fase 3 e inicie a API com "
+            "POTIA_LLM_ENGINE=transformers ou vllm. Enquanto isso, pergunte sobre "
+            "brigadeiro, bolo de cenoura ou arroz!"
+        )
+
+
+def _dtype_kwarg(value: Any) -> dict[str, Any]:
+    import transformers
+    from packaging.version import Version
+
+    key = "dtype" if Version(transformers.__version__) >= Version("4.56.0") else "torch_dtype"
+    return {key: value}
+
+
+def _make_cancel_criteria(event: threading.Event) -> Any:
+    import torch
+    from transformers import StoppingCriteria
+
+    class CancelCriteria(StoppingCriteria):
+        def __call__(self, input_ids: Any, scores: Any, **kwargs: Any) -> Any:
+            return torch.full((input_ids.shape[0],), event.is_set(), dtype=torch.bool, device=input_ids.device)
+
+    return CancelCriteria()
+
+
+class TransformersEngine(LLMEngine):
+    name = "transformers"
+
+    def __init__(self, settings: Settings) -> None:
+        super().__init__(settings)
+        self.model: Any = None
+        self.tokenizer: Any = None
+        self._queue_lock = asyncio.Lock()
+        self._gpu_lock = threading.Lock()
+
+    async def startup(self) -> None:
+        logger.info("Carregando modelo de %s (isso pode levar alguns minutos)...", self.settings.model_path)
+        await asyncio.to_thread(self._load)
+        self.ready = True
+        logger.info("Modelo pronto em %s.", self.model.device)
+
+    def _load(self) -> None:
+        try:
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+        except ImportError as exc:
+            raise RuntimeError("Instale backend/requirements-gpu.txt para usar POTIA_LLM_ENGINE=transformers.") from exc
+
+        s = self.settings
+        kwargs: dict[str, Any] = {"device_map": "auto", "low_cpu_mem_usage": True, **_dtype_kwarg("auto")}
+        if s.load_in_4bit:
+            from transformers import BitsAndBytesConfig
+
+            ampere = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8
+            kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_compute_dtype=torch.bfloat16 if ampere else torch.float16,
+            )
+        model = AutoModelForCausalLM.from_pretrained(s.model_path, **kwargs)
+        if s.adapter_path:
+            from peft import PeftModel
+
+            model = PeftModel.from_pretrained(model, s.adapter_path)
+        model.eval()
+
+        tokenizer = AutoTokenizer.from_pretrained(s.adapter_path or s.model_path)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        self.model, self.tokenizer = model, tokenizer
+
+    def _run_generate(self, kwargs: dict[str, Any], streamer: Any, errors: list[BaseException]) -> None:
+        try:
+            with self._gpu_lock:
+                self.model.generate(**kwargs)
+        except BaseException as exc:
+            logger.exception("Erro durante model.generate")
+            errors.append(exc)
+            streamer.end()
+
+    async def stream(self, messages: Messages, params: GenerationParams) -> AsyncIterator[str]:
+        if not self.ready:
+            raise EngineError("O modelo ainda está carregando. Tente novamente em instantes.")
+        from transformers import StoppingCriteriaList, TextIteratorStreamer
+
+        async with self._queue_lock:
+            prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            inputs = self.tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to(self.model.device)
+            streamer = TextIteratorStreamer(
+                self.tokenizer, skip_prompt=True, skip_special_tokens=True, timeout=self.settings.generation_timeout
+            )
+            cancel = threading.Event()
+            errors: list[BaseException] = []
+            kwargs: dict[str, Any] = {
+                **inputs,
+                "streamer": streamer,
+                "max_new_tokens": params.max_new_tokens,
+                "repetition_penalty": params.repetition_penalty,
+                "pad_token_id": self.tokenizer.pad_token_id,
+                "stopping_criteria": StoppingCriteriaList([_make_cancel_criteria(cancel)]),
+            }
+            if params.temperature > 0:
+                kwargs.update(do_sample=True, temperature=params.temperature, top_p=params.top_p)
+            else:
+                kwargs["do_sample"] = False
+
+            thread = threading.Thread(target=self._run_generate, args=(kwargs, streamer, errors), daemon=True)
+            thread.start()
+            try:
+                async for text in iterate_in_threadpool(streamer):
+                    if text:
+                        yield text
+            except queue.Empty as exc:
+                raise EngineError("O modelo demorou demais para responder.") from exc
+            finally:
+                cancel.set()
+
+        if errors:
+            raise EngineError("Falha ao gerar a resposta no modelo.") from errors[0]
+
+    def describe(self) -> dict[str, Any]:
+        info = super().describe()
+        if self.model is not None:
+            info["device"] = str(self.model.device)
+        info["model_path"] = self.settings.model_path
+        return info
+
+
+class VLLMEngine(LLMEngine):
+    name = "vllm"
+
+    def __init__(self, settings: Settings) -> None:
+        super().__init__(settings)
+        self._client: httpx.AsyncClient | None = None
+
+    async def startup(self) -> None:
+        headers = {"Authorization": f"Bearer {self.settings.vllm_api_key}"} if self.settings.vllm_api_key else {}
+        self._client = httpx.AsyncClient(
+            base_url=self.settings.vllm_base_url,
+            headers=headers,
+            timeout=httpx.Timeout(connect=10.0, read=self.settings.generation_timeout, write=30.0, pool=10.0),
+        )
+        try:
+            response = await self._client.get("/v1/models")
+            response.raise_for_status()
+            served = [m.get("id") for m in response.json().get("data", [])]
+            if self.settings.vllm_model not in served:
+                logger.warning("Modelo %r não encontrado no vLLM. Disponíveis: %s", self.settings.vllm_model, served)
+            self.ready = True
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("vLLM indisponível em %s (%s).", self.settings.vllm_base_url, exc)
+
+    async def shutdown(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+        self.ready = False
+
+    async def stream(self, messages: Messages, params: GenerationParams) -> AsyncIterator[str]:
+        assert self._client is not None, "startup() não foi chamado"
+        payload = {
+            "model": self.settings.vllm_model,
+            "messages": messages,
+            "stream": True,
+            "max_tokens": params.max_new_tokens,
+            "temperature": params.temperature,
+            "top_p": params.top_p,
+            "repetition_penalty": params.repetition_penalty,
+        }
+        try:
+            async with self._client.stream("POST", "/v1/chat/completions", json=payload) as response:
+                if response.status_code != 200:
+                    body = (await response.aread()).decode("utf-8", "replace")[:300]
+                    logger.error("vLLM respondeu %s: %s", response.status_code, body)
+                    raise EngineError(f"O servidor do modelo respondeu com erro {response.status_code}.")
+                self.ready = True
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = chunk.get("choices") or []
+                    delta = (choices[0].get("delta") or {}).get("content") if choices else None
+                    if delta:
+                        yield delta
+        except httpx.ConnectError as exc:
+            self.ready = False
+            raise EngineError("Não foi possível conectar ao servidor do modelo (vLLM).") from exc
+        except httpx.TimeoutException as exc:
+            raise EngineError("O servidor do modelo demorou demais para responder.") from exc
+        except httpx.HTTPError as exc:
+            raise EngineError("Erro de comunicação com o servidor do modelo.") from exc
+
+
+def create_engine(settings: Settings) -> LLMEngine:
+    engines: dict[str, type[LLMEngine]] = {
+        "mock": MockEngine,
+        "transformers": TransformersEngine,
+        "vllm": VLLMEngine,
+    }
+    return engines[settings.llm_engine](settings)

@@ -1,0 +1,1 @@
+# Uma URL de receita por linha.
