@@ -97,8 +97,18 @@ Motor de inferência (`POTIA_LLM_ENGINE` no `.env`):
 | Valor | Quando usar |
 |---|---|
 | `mock` | desenvolver o app sem GPU (respostas prontas, com streaming) |
+| `ollama` | modelo local pronto, sem treino (Windows/macOS/Linux, GPU de 8 GB já basta) |
 | `transformers` | modelo carregado na própria API (`pip install -r requirements-gpu.txt`) |
 | `vllm` | produção: `bash scripts/serve_vllm.sh` (Linux/WSL) e a API repassa o stream |
+
+Para usar o Ollama, instale-o, baixe o modelo e troque `POTIA_LLM_ENGINE=ollama` no `.env`:
+
+```bash
+winget install Ollama.Ollama
+ollama pull qwen2.5:7b
+```
+
+O `qwen2.5:7b` (~4,7 GB) é o mesmo modelo base do fine-tuning da Fase 3. Outro modelo pode ser usado com `POTIA_OLLAMA_MODEL`.
 
 Gere uma chave JWT nova com:
 

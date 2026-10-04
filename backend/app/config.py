@@ -18,13 +18,21 @@ logger = logging.getLogger("potia.config")
 
 DEFAULT_SYSTEM_PROMPT = (
     "Você é a PotIA, uma assistente culinária brasileira simpática, paciente e precisa. "
-    "Responda sempre em português do Brasil. Ao passar uma receita, informe o tempo de preparo "
-    "e o rendimento quando souber, liste os ingredientes com as medidas e explique o modo de "
-    "preparo em passos numerados. Se não tiver certeza de algo, diga isso com honestidade e "
-    "sugira alternativas seguras."
+    "Responda sempre em português do Brasil, em texto simples, sem Markdown (nada de #, ** ou tabelas).\n\n"
+    "Ao passar uma receita, prefira a versão tradicional brasileira do prato, comece com uma frase curta "
+    "e siga este formato:\n"
+    "⏱️ Tempo de preparo: ...\n"
+    "🍽️ Rendimento: ...\n\n"
+    "Ingredientes:\n"
+    "• quantidade e ingrediente\n\n"
+    "Modo de preparo:\n"
+    "1. passo\n\n"
+    "Use medidas caseiras (xícara, colher de sopa) ou gramas. Se não tiver certeza de algo, diga isso com "
+    "honestidade e sugira alternativas seguras. Se a pergunta não for sobre culinária, responda em poucas "
+    "palavras e traga a conversa de volta para a cozinha."
 )
 
-VALID_ENGINES = ("mock", "transformers", "vllm")
+VALID_ENGINES = ("mock", "transformers", "vllm", "ollama")
 
 
 def _env(name: str, default: str | None = None) -> str | None:
@@ -70,10 +78,14 @@ class Settings:
     vllm_base_url: str = "http://localhost:8001"
     vllm_model: str = "potia"
     vllm_api_key: str | None = None
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "qwen2.5:7b"
+    ollama_num_ctx: int = 8192
+    ollama_keep_alive: str = "30m"
     mock_token_delay: float = 0.03
 
     max_new_tokens: int = 1024
-    temperature: float = 0.7
+    temperature: float = 0.4
     top_p: float = 0.9
     repetition_penalty: float = 1.05
     generation_timeout: float = 120.0
@@ -113,6 +125,10 @@ class Settings:
             vllm_base_url=_env("VLLM_BASE_URL", defaults.vllm_base_url).rstrip("/"),
             vllm_model=_env("VLLM_MODEL", defaults.vllm_model),
             vllm_api_key=_env("VLLM_API_KEY"),
+            ollama_base_url=_env("OLLAMA_BASE_URL", defaults.ollama_base_url).rstrip("/"),
+            ollama_model=_env("OLLAMA_MODEL", defaults.ollama_model),
+            ollama_num_ctx=_env_int("OLLAMA_NUM_CTX", defaults.ollama_num_ctx),
+            ollama_keep_alive=_env("OLLAMA_KEEP_ALIVE", defaults.ollama_keep_alive),
             mock_token_delay=_env_float("MOCK_TOKEN_DELAY", defaults.mock_token_delay),
             max_new_tokens=_env_int("MAX_NEW_TOKENS", defaults.max_new_tokens),
             temperature=_env_float("TEMPERATURE", defaults.temperature),

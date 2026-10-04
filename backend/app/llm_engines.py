@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import queue
@@ -115,8 +116,8 @@ class MockEngine(LLMEngine):
             "Olá! Estou rodando em modo de demonstração (POTIA_LLM_ENGINE=mock), "
             "então ainda não consigo criar receitas novas. 😊\n\n"
             f"Você perguntou: \"{short}\"\n\n"
-            "Para respostas de verdade, treine o modelo na Fase 3 e inicie a API com "
-            "POTIA_LLM_ENGINE=transformers ou vllm. Enquanto isso, pergunte sobre "
+            "Para respostas de verdade, use POTIA_LLM_ENGINE=ollama ou treine o modelo na Fase 3 "
+            "e use POTIA_LLM_ENGINE=transformers ou vllm. Enquanto isso, pergunte sobre "
             "brigadeiro, bolo de cenoura ou arroz!"
         )
 
@@ -244,37 +245,68 @@ class TransformersEngine(LLMEngine):
         return info
 
 
-class VLLMEngine(LLMEngine):
-    name = "vllm"
+class HTTPEngine(LLMEngine):
+    label = "servidor do modelo"
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None) -> None:
         super().__init__(settings)
+        self._transport = transport
         self._client: httpx.AsyncClient | None = None
 
-    async def startup(self) -> None:
-        headers = {"Authorization": f"Bearer {self.settings.vllm_api_key}"} if self.settings.vllm_api_key else {}
+    def _open_client(self, base_url: str, headers: dict[str, str] | None = None) -> None:
         self._client = httpx.AsyncClient(
-            base_url=self.settings.vllm_base_url,
-            headers=headers,
+            base_url=base_url,
+            headers=headers or {},
+            transport=self._transport,
             timeout=httpx.Timeout(connect=10.0, read=self.settings.generation_timeout, write=30.0, pool=10.0),
         )
-        try:
-            response = await self._client.get("/v1/models")
-            response.raise_for_status()
-            served = [m.get("id") for m in response.json().get("data", [])]
-            if self.settings.vllm_model not in served:
-                logger.warning("Modelo %r não encontrado no vLLM. Disponíveis: %s", self.settings.vllm_model, served)
-            self.ready = True
-        except (httpx.HTTPError, ValueError) as exc:
-            logger.warning("vLLM indisponível em %s (%s).", self.settings.vllm_base_url, exc)
 
     async def shutdown(self) -> None:
         if self._client is not None:
             await self._client.aclose()
         self.ready = False
 
-    async def stream(self, messages: Messages, params: GenerationParams) -> AsyncIterator[str]:
+    def _status_error(self, status_code: int, body: str) -> EngineError:
+        return EngineError(f"O {self.label} respondeu com erro {status_code}.")
+
+    async def _stream_lines(self, path: str, payload: dict[str, Any]) -> AsyncIterator[str]:
         assert self._client is not None, "startup() não foi chamado"
+        try:
+            async with self._client.stream("POST", path, json=payload) as response:
+                if response.status_code != 200:
+                    body = (await response.aread()).decode("utf-8", "replace")[:300]
+                    logger.error("%s respondeu %s: %s", self.name, response.status_code, body)
+                    raise self._status_error(response.status_code, body)
+                self.ready = True
+                async for line in response.aiter_lines():
+                    yield line
+        except httpx.ConnectError as exc:
+            self.ready = False
+            raise EngineError(f"Não foi possível conectar ao {self.label}.") from exc
+        except httpx.TimeoutException as exc:
+            raise EngineError(f"O {self.label} demorou demais para responder.") from exc
+        except httpx.HTTPError as exc:
+            raise EngineError(f"Erro de comunicação com o {self.label}.") from exc
+
+
+class VLLMEngine(HTTPEngine):
+    name = "vllm"
+    label = "servidor do modelo (vLLM)"
+
+    async def startup(self) -> None:
+        s = self.settings
+        self._open_client(s.vllm_base_url, {"Authorization": f"Bearer {s.vllm_api_key}"} if s.vllm_api_key else None)
+        try:
+            response = await self._client.get("/v1/models")
+            response.raise_for_status()
+            served = [m.get("id") for m in response.json().get("data", [])]
+            if s.vllm_model not in served:
+                logger.warning("Modelo %r não encontrado no vLLM. Disponíveis: %s", s.vllm_model, served)
+            self.ready = True
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("vLLM indisponível em %s (%s).", s.vllm_base_url, exc)
+
+    async def stream(self, messages: Messages, params: GenerationParams) -> AsyncIterator[str]:
         payload = {
             "model": self.settings.vllm_model,
             "messages": messages,
@@ -284,34 +316,85 @@ class VLLMEngine(LLMEngine):
             "top_p": params.top_p,
             "repetition_penalty": params.repetition_penalty,
         }
+        async with contextlib.aclosing(self._stream_lines("/v1/chat/completions", payload)) as lines:
+            async for line in lines:
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                choices = chunk.get("choices") or []
+                delta = (choices[0].get("delta") or {}).get("content") if choices else None
+                if delta:
+                    yield delta
+
+
+def _ollama_name(model: str) -> str:
+    return model if ":" in model else f"{model}:latest"
+
+
+class OllamaEngine(HTTPEngine):
+    name = "ollama"
+    label = "Ollama"
+
+    async def startup(self) -> None:
+        s = self.settings
+        self._open_client(s.ollama_base_url)
         try:
-            async with self._client.stream("POST", "/v1/chat/completions", json=payload) as response:
-                if response.status_code != 200:
-                    body = (await response.aread()).decode("utf-8", "replace")[:300]
-                    logger.error("vLLM respondeu %s: %s", response.status_code, body)
-                    raise EngineError(f"O servidor do modelo respondeu com erro {response.status_code}.")
-                self.ready = True
-                async for line in response.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    data = line[5:].strip()
-                    if data == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    choices = chunk.get("choices") or []
-                    delta = (choices[0].get("delta") or {}).get("content") if choices else None
-                    if delta:
-                        yield delta
-        except httpx.ConnectError as exc:
-            self.ready = False
-            raise EngineError("Não foi possível conectar ao servidor do modelo (vLLM).") from exc
-        except httpx.TimeoutException as exc:
-            raise EngineError("O servidor do modelo demorou demais para responder.") from exc
-        except httpx.HTTPError as exc:
-            raise EngineError("Erro de comunicação com o servidor do modelo.") from exc
+            response = await self._client.get("/api/tags")
+            response.raise_for_status()
+            installed = {m.get("name") for m in response.json().get("models", [])}
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("Ollama indisponível em %s (%s). Abra o Ollama e reinicie a API.", s.ollama_base_url, exc)
+            return
+        if _ollama_name(s.ollama_model) in installed:
+            self.ready = True
+        else:
+            logger.warning(
+                "Modelo %r não está instalado no Ollama. Rode: ollama pull %s. Instalados: %s",
+                s.ollama_model, s.ollama_model, sorted(installed),
+            )
+
+    def _status_error(self, status_code: int, body: str) -> EngineError:
+        if status_code == 404:
+            return EngineError("O modelo da PotIA não está instalado no Ollama.")
+        return super()._status_error(status_code, body)
+
+    async def stream(self, messages: Messages, params: GenerationParams) -> AsyncIterator[str]:
+        s = self.settings
+        payload = {
+            "model": s.ollama_model,
+            "messages": messages,
+            "stream": True,
+            "keep_alive": s.ollama_keep_alive,
+            "options": {
+                "num_ctx": s.ollama_num_ctx,
+                "num_predict": params.max_new_tokens,
+                "temperature": params.temperature,
+                "top_p": params.top_p,
+                "repeat_penalty": params.repetition_penalty,
+            },
+        }
+        async with contextlib.aclosing(self._stream_lines("/api/chat", payload)) as lines:
+            async for line in lines:
+                if not line.strip():
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if chunk.get("error"):
+                    logger.error("Ollama: %s", chunk["error"])
+                    raise EngineError("O Ollama interrompeu a resposta.")
+                content = (chunk.get("message") or {}).get("content")
+                if content:
+                    yield content
+                if chunk.get("done"):
+                    break
 
 
 def create_engine(settings: Settings) -> LLMEngine:
@@ -319,5 +402,6 @@ def create_engine(settings: Settings) -> LLMEngine:
         "mock": MockEngine,
         "transformers": TransformersEngine,
         "vllm": VLLMEngine,
+        "ollama": OllamaEngine,
     }
     return engines[settings.llm_engine](settings)
