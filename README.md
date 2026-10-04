@@ -80,6 +80,8 @@ python main.py
 
 Documentação interativa em http://localhost:8000/docs. Testes: `pytest -v`.
 
+> **Windows com Python do `uv`:** se `python` abrir a Microsoft Store, use `python3.14` no lugar dele e instale as dependências com `python3.14 -m pip install --user --break-system-packages -r requirements.txt`. O mesmo vale para os scripts de `ml/`.
+
 | Endpoint | Descrição |
 |---|---|
 | `POST /api/v1/auth/register` | `{name, email, password}` → JWT |
